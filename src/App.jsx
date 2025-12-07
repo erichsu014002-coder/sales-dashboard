@@ -1,22 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, PieChart, Pie, Cell 
+  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell 
 } from 'recharts';
 import { 
-  Building2, TrendingUp, Users, Wallet, HardHat, ClipboardCheck, AlertCircle, Briefcase, LayoutDashboard, Database, Map, PieChart as PieIcon, CheckCircle2, CalendarDays, ChevronDown, Plus, Trash2, Save, RefreshCw, Edit3, Cloud, Loader2
+  Building2, TrendingUp, Users, Wallet, HardHat, AlertCircle, Briefcase, LayoutDashboard, Database, Map, PieChart as PieIcon, CheckCircle2, ChevronDown, Plus, Trash2, Save, HardDrive, Loader2
 } from 'lucide-react';
-
-// Firebase Imports
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
-import { getFirestore, doc, setDoc, onSnapshot, collection } from "firebase/firestore";
-
-// --- Firebase Initialization ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- 專案參數設定 (初始值) ---
 const DEFAULT_PROJECT_NAME = "麗晨建設【花果山】";
@@ -83,7 +71,7 @@ const CreatableSelect = ({ value, options, onChange, placeholder }) => {
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="absolute right-1 p-1 text-slate-400 hover:text-indigo-600 cursor-pointer"
-          tabIndex={-1} // 避免 tab 鍵選中按鈕
+          tabIndex={-1} 
         >
           <ChevronDown className="w-4 h-4" />
         </button>
@@ -110,7 +98,7 @@ const CreatableSelect = ({ value, options, onChange, placeholder }) => {
   );
 };
 
-// --- 2025年 數據 (模擬真實進度：已售81戶，剩餘16戶) ---
+// --- 2025年 數據 (初始值) ---
 const initialData2025 = [
   { month: '1月', phase: '成屋銷售', targetUnits: 1, actualUnits: 1, visitors: 12, digitalLeads: 5, digitalDeals: 0, actualRev: 34000000, adBudget: 150000, actualAd: 120000, construction: '使照申請中', strategy: '【銷售節奏】農曆年前/後 封關衝刺', action: '【現場活動】舉辦住戶回娘家/說明會' },
   { month: '2月', phase: '成屋銷售', targetUnits: 1, actualUnits: 1, visitors: 8, digitalLeads: 3, digitalDeals: 0, actualRev: 35250000, adBudget: 100000, actualAd: 80000, construction: '公設細修', strategy: '【產品優勢】強調「無共用壁」與「三面採光」', action: '【客戶經營】針對舊客/網路名單 進行深度回訪' },
@@ -194,19 +182,14 @@ const Card = ({ title, value, subtext, icon: Icon, colorClass, highlight }) => (
 );
 
 export default function RealEstateSalesDashboard() {
-  const [user, setUser] = useState(null);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle, saving, success, error
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle, saving, success
 
+  // Data States
   const [year, setYear] = useState(2025);
   const [data2025, setData2025] = useState(initialData2025);
   const [data2026, setData2026] = useState(initialData2026);
-  
-  // 業務資料與銷控表現在是 State，可編輯
   const [agentData, setAgentData] = useState(initialAgentData);
   const [salesControlData, setSalesControlData] = useState(initialSalesControl);
-
-  // 專案整體參數 (可編輯)
   const [projectStats, setProjectStats] = useState(initialProjectStats);
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -214,72 +197,50 @@ export default function RealEstateSalesDashboard() {
   const currentData = year === 2025 ? data2025 : data2026;
   const setCurrentData = year === 2025 ? setData2025 : setData2026;
 
-  // --- Auth & Data Loading ---
+  // --- Load Data from LocalStorage on Mount ---
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+    const savedData = localStorage.getItem('dashboardData');
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        if (parsed.data2025) setData2025(parsed.data2025);
+        if (parsed.data2026) setData2026(parsed.data2026);
+        if (parsed.agentData) setAgentData(parsed.agentData);
+        if (parsed.salesControlData) setSalesControlData(parsed.salesControlData);
+        if (parsed.projectStats) setProjectStats(parsed.projectStats);
+      } catch (e) {
+        console.error("Failed to parse saved data", e);
       }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
+    }
   }, []);
 
-  // Fetch Data when user is logged in
-  useEffect(() => {
-    if (!user) return;
-
-    const dataRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dashboard_data', 'main');
-    
-    const unsubscribeSnapshot = onSnapshot(dataRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const savedData = docSnap.data();
-        if (savedData.data2025) setData2025(savedData.data2025);
-        if (savedData.data2026) setData2026(savedData.data2026);
-        if (savedData.agentData) setAgentData(savedData.agentData);
-        if (savedData.salesControlData) setSalesControlData(savedData.salesControlData);
-        if (savedData.projectStats) setProjectStats(savedData.projectStats);
-      }
-      setIsDataLoaded(true);
-    }, (error) => {
-      console.error("Error fetching data:", error);
-      setIsDataLoaded(true); // Stop loading even if error
-    });
-
-    return () => unsubscribeSnapshot();
-  }, [user]);
-
-  // --- Save Function ---
-  const handleSave = async () => {
-    if (!user) return;
+  // --- Save Function (To LocalStorage) ---
+  const handleSave = () => {
     setSaveStatus('saving');
     
-    try {
-      const dataRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dashboard_data', 'main');
-      await setDoc(dataRef, {
-        data2025,
-        data2026,
-        agentData,
-        salesControlData,
-        projectStats,
-        lastUpdated: new Date().toISOString()
-      });
-      setSaveStatus('success');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch (error) {
-      console.error("Error saving data:", error);
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-    }
+    // Simulate network delay for better UX
+    setTimeout(() => {
+      try {
+        const dataToSave = {
+          data2025,
+          data2026,
+          agentData,
+          salesControlData,
+          projectStats,
+          lastUpdated: new Date().toISOString()
+        };
+        localStorage.setItem('dashboardData', JSON.stringify(dataToSave));
+        setSaveStatus('success');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch (error) {
+        console.error("Save failed:", error);
+        setSaveStatus('error');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      }
+    }, 600);
   };
 
-  // --- 計算全案匯總數據 (來源：銷控表) ---
+  // --- 計算全案匯總數據 ---
   const projectSummary = useMemo(() => {
     const totalUnits = salesControlData.reduce((acc, curr) => acc + Number(curr.total), 0);
     const totalSold = salesControlData.reduce((acc, curr) => acc + Number(curr.sold), 0);
@@ -293,7 +254,7 @@ export default function RealEstateSalesDashboard() {
     return { totalUnits, totalSold, estimatedTotalRev, estimatedActualRev, remainingUnits, remainingRevenue, sellThroughRate };
   }, [salesControlData]);
 
-  // --- 年度數據匯總 (來源：月報表) ---
+  // --- 年度數據匯總 ---
   const yearSummary = useMemo(() => {
     const currentYearSoldUnits = currentData.reduce((acc, curr) => acc + curr.actualUnits, 0);
     const totalAdBudget = currentData.reduce((acc, curr) => acc + curr.adBudget, 0);
@@ -305,7 +266,6 @@ export default function RealEstateSalesDashboard() {
 
 
   // --- 處理函數 ---
-
   const handleValueChange = (index, field, value) => {
     const newData = [...currentData];
     newData[index][field] = ['strategy', 'action', 'construction', 'phase'].includes(field) ? value : Number(value);
@@ -313,10 +273,7 @@ export default function RealEstateSalesDashboard() {
   };
   
   const handleProjectStatsChange = (field, value) => {
-    setProjectStats(prev => ({
-      ...prev,
-      [field]: Number(value)
-    }));
+    setProjectStats(prev => ({ ...prev, [field]: Number(value) }));
   };
 
   const handleAgentChange = (id, field, value) => {
@@ -342,15 +299,6 @@ export default function RealEstateSalesDashboard() {
     setSalesControlData(newControlData);
   };
 
-  if (!isDataLoaded) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-500">
-        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mb-4" />
-        <p>正在載入您的專案數據...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-6">
       {/* Header */}
@@ -366,7 +314,7 @@ export default function RealEstateSalesDashboard() {
               </div>
             </div>
             <p className="text-slate-500 text-sm flex items-center gap-2">
-              <Cloud className="w-4 h-4" /> 雲端同步中 | 狀態：{year === 2025 ? '成屋餘屋銷售期' : '完銷衝刺'}
+              <HardDrive className="w-4 h-4" /> 本機資料模式 | 狀態：{year === 2025 ? '成屋餘屋銷售期' : '完銷衝刺'}
             </p>
           </div>
           
@@ -382,7 +330,7 @@ export default function RealEstateSalesDashboard() {
               `}
             >
               {saveStatus === 'saving' ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
-              {saveStatus === 'idle' && '儲存變更'}
+              {saveStatus === 'idle' && '儲存變更 (本機)'}
               {saveStatus === 'saving' && '儲存中...'}
               {saveStatus === 'success' && '已儲存！'}
               {saveStatus === 'error' && '儲存失敗'}
