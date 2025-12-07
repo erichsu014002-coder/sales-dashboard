@@ -3,8 +3,20 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, PieChart, Pie, Cell 
 } from 'recharts';
 import { 
-  Building2, TrendingUp, Users, Wallet, HardHat, ClipboardCheck, AlertCircle, Briefcase, LayoutDashboard, Database, Map, PieChart as PieIcon, CheckCircle2, CalendarDays, ChevronDown, Plus, Trash2, Save, RefreshCw, Edit3
+  Building2, TrendingUp, Users, Wallet, HardHat, ClipboardCheck, AlertCircle, Briefcase, LayoutDashboard, Database, Map, PieChart as PieIcon, CheckCircle2, CalendarDays, ChevronDown, Plus, Trash2, Save, RefreshCw, Edit3, Cloud, Loader2
 } from 'lucide-react';
+
+// Firebase Imports
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
+import { getFirestore, doc, setDoc, onSnapshot, collection } from "firebase/firestore";
+
+// --- Firebase Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- 專案參數設定 (初始值) ---
 const DEFAULT_PROJECT_NAME = "麗晨建設【花果山】";
@@ -99,7 +111,6 @@ const CreatableSelect = ({ value, options, onChange, placeholder }) => {
 };
 
 // --- 2025年 數據 (模擬真實進度：已售81戶，剩餘16戶) ---
-// *已補全 construction 欄位以避免策略地圖報錯*
 const initialData2025 = [
   { month: '1月', phase: '成屋銷售', targetUnits: 1, actualUnits: 1, visitors: 12, digitalLeads: 5, digitalDeals: 0, actualRev: 34000000, adBudget: 150000, actualAd: 120000, construction: '使照申請中', strategy: '【銷售節奏】農曆年前/後 封關衝刺', action: '【現場活動】舉辦住戶回娘家/說明會' },
   { month: '2月', phase: '成屋銷售', targetUnits: 1, actualUnits: 1, visitors: 8, digitalLeads: 3, digitalDeals: 0, actualRev: 35250000, adBudget: 100000, actualAd: 80000, construction: '公設細修', strategy: '【產品優勢】強調「無共用壁」與「三面採光」', action: '【客戶經營】針對舊客/網路名單 進行深度回訪' },
@@ -154,6 +165,15 @@ const initialSalesControl = [
   { id: 'S', type: '店面', total: 1, sold: 1, avgPrice: 58000000 },
 ];
 
+const initialProjectStats = {
+  totalRev: 316667, // 萬元
+  remainingRev: 57460, // 萬元
+  totalUnits: 97,
+  remainingUnits: 16,
+  totalCars: 166,
+  remainingCars: 33
+};
+
 const formatMoney = (value) => {
   if (value >= 100000000) return `${(value / 100000000).toFixed(2)}億`;
   if (value >= 10000) return `${(value / 10000).toFixed(0)}萬`;
@@ -174,6 +194,10 @@ const Card = ({ title, value, subtext, icon: Icon, colorClass, highlight }) => (
 );
 
 export default function RealEstateSalesDashboard() {
+  const [user, setUser] = useState(null);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle, saving, success, error
+
   const [year, setYear] = useState(2025);
   const [data2025, setData2025] = useState(initialData2025);
   const [data2026, setData2026] = useState(initialData2026);
@@ -183,19 +207,77 @@ export default function RealEstateSalesDashboard() {
   const [salesControlData, setSalesControlData] = useState(initialSalesControl);
 
   // 專案整體參數 (可編輯)
-  const [projectStats, setProjectStats] = useState({
-    totalRev: 316667, // 萬元
-    remainingRev: 57460, // 萬元
-    totalUnits: 97,
-    remainingUnits: 16,
-    totalCars: 166,
-    remainingCars: 33
-  });
+  const [projectStats, setProjectStats] = useState(initialProjectStats);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   
   const currentData = year === 2025 ? data2025 : data2026;
   const setCurrentData = year === 2025 ? setData2025 : setData2026;
+
+  // --- Auth & Data Loading ---
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Data when user is logged in
+  useEffect(() => {
+    if (!user) return;
+
+    const dataRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dashboard_data', 'main');
+    
+    const unsubscribeSnapshot = onSnapshot(dataRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const savedData = docSnap.data();
+        if (savedData.data2025) setData2025(savedData.data2025);
+        if (savedData.data2026) setData2026(savedData.data2026);
+        if (savedData.agentData) setAgentData(savedData.agentData);
+        if (savedData.salesControlData) setSalesControlData(savedData.salesControlData);
+        if (savedData.projectStats) setProjectStats(savedData.projectStats);
+      }
+      setIsDataLoaded(true);
+    }, (error) => {
+      console.error("Error fetching data:", error);
+      setIsDataLoaded(true); // Stop loading even if error
+    });
+
+    return () => unsubscribeSnapshot();
+  }, [user]);
+
+  // --- Save Function ---
+  const handleSave = async () => {
+    if (!user) return;
+    setSaveStatus('saving');
+    
+    try {
+      const dataRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dashboard_data', 'main');
+      await setDoc(dataRef, {
+        data2025,
+        data2026,
+        agentData,
+        salesControlData,
+        projectStats,
+        lastUpdated: new Date().toISOString()
+      });
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error("Error saving data:", error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  };
 
   // --- 計算全案匯總數據 (來源：銷控表) ---
   const projectSummary = useMemo(() => {
@@ -260,6 +342,15 @@ export default function RealEstateSalesDashboard() {
     setSalesControlData(newControlData);
   };
 
+  if (!isDataLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-500">
+        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mb-4" />
+        <p>正在載入您的專案數據...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-6">
       {/* Header */}
@@ -274,26 +365,46 @@ export default function RealEstateSalesDashboard() {
                 <button onClick={() => setYear(2026)} className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${year === 2026 ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>2026 (完銷年)</button>
               </div>
             </div>
-            <p className="text-slate-500 text-sm">
-              數據來源：即時銷控表連動 (Excel-like) | 狀態：{year === 2025 ? '成屋餘屋銷售期' : '完銷衝刺'}
+            <p className="text-slate-500 text-sm flex items-center gap-2">
+              <Cloud className="w-4 h-4" /> 雲端同步中 | 狀態：{year === 2025 ? '成屋餘屋銷售期' : '完銷衝刺'}
             </p>
           </div>
-          <div className="flex bg-white rounded-lg p-1 shadow-sm border border-slate-200 overflow-x-auto">
-            {[
-              { id: 'dashboard', label: '戰情總覽', icon: LayoutDashboard },
-              { id: 'ledger', label: '月度執行表', icon: Database },
-              { id: 'salesControl', label: '銷控與團隊', icon: Users }, 
-              { id: 'strategy', label: '策略地圖', icon: Map },
-            ].map(tab => (
-              <button 
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)} 
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            ))}
+          
+          <div className="flex items-center gap-4">
+            {/* SAVE BUTTON */}
+            <button 
+              onClick={handleSave} 
+              disabled={saveStatus === 'saving'}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-sm font-bold transition-all
+                ${saveStatus === 'success' ? 'bg-green-600 text-white hover:bg-green-700' : 
+                  saveStatus === 'error' ? 'bg-red-600 text-white' :
+                  'bg-indigo-600 text-white hover:bg-indigo-700'}
+              `}
+            >
+              {saveStatus === 'saving' ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
+              {saveStatus === 'idle' && '儲存變更'}
+              {saveStatus === 'saving' && '儲存中...'}
+              {saveStatus === 'success' && '已儲存！'}
+              {saveStatus === 'error' && '儲存失敗'}
+            </button>
+
+            <div className="flex bg-white rounded-lg p-1 shadow-sm border border-slate-200 overflow-x-auto">
+              {[
+                { id: 'dashboard', label: '戰情總覽', icon: LayoutDashboard },
+                { id: 'ledger', label: '月度執行表', icon: Database },
+                { id: 'salesControl', label: '銷控與團隊', icon: Users }, 
+                { id: 'strategy', label: '策略地圖', icon: Map },
+              ].map(tab => (
+                <button 
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)} 
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <tab.icon className="w-4 h-4" />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         
